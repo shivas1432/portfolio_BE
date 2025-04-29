@@ -23,8 +23,8 @@ const app = express();
 app.use('/uploads', express.static('uploads'));
 app.use(express.json());
 app.use(cors({
-    origin: "http://localhost:3000",
-    credentials: true
+    origin: ["http://localhost:3000", "https://shivashankerportfolio.netlify.app"],
+    credentials: true 
 }));
 app.use(cookieParser());
 
