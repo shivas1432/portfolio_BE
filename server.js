@@ -15,6 +15,7 @@ import GetReferenceRoute from './routes/getReferenceRoute.js';
 import UkCitiesRouter from './routes/ukCities.js';
 import apiChatRoute from './routes/apiChatRoute.js';
 import projectActionsRoute from './routes/projectActionsRoute.js';
+import weatherRoutes from './routes/weatherRoutes.js';
 
 dotenv.config();
 
@@ -93,6 +94,7 @@ app.use('/api/references', ReferenceRoute);
 app.use('/api/references/get', GetReferenceRoute);
 app.use('/api', UkCitiesRouter);
 app.use('/api/projects', projectActionsRoute);
+app.use('/api/weather', weatherRoutes);
 
 const PORT = process.env.PORT || 8081;
 app.listen(PORT, () => {
