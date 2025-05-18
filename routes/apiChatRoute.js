@@ -128,16 +128,17 @@ const callGeminiWithRetry = async (message, isPortfolioQuestion = false, retries
       ${portfolioContext.website}
       
       INSTRUCTIONS:
-      1. ALWAYS provide detailed information from the portfolio context above instead of just redirecting to the website
-      2. Only include the website link as additional information, not as the sole response
-      3. Answer questions directly using the information provided
-      4. Be detailed in your responses about projects, skills, and experience
-      5. For general greetings, respond in a friendly and professional manner
-      6. Use markdown formatting to make your responses more readable when appropriate
+      1. ALWAYS provide specific information directly from the portfolio context above
+      2. NEVER start your response with "visit the website" or similar phrases
+      3. Respond first with detailed information and only mention the website at the end of your response
+      4. Always include actual portfolio details (projects, skills, experience) in your response
+      5. Only suggest visiting the website for more details after providing an informative answer
+      6. For general greetings, respond in a friendly and professional manner
+      7. Use markdown formatting to make your responses more readable when appropriate
       
       User's question: ${message}
       
-      Respond in a helpful, professional tone with SPECIFIC DETAILS from the portfolio information above.
+      Respond in a helpful, professional tone with SPECIFIC DETAILS from the portfolio information above. Do NOT just refer them to the website.
     `;
   }
   
@@ -189,9 +190,11 @@ const callGeminiWithRetry = async (message, isPortfolioQuestion = false, retries
 };
 
 const postProcessResponse = (response) => {
+  // Check if response is just a short redirect
   if (response.includes(portfolioContext.website) && 
       (response.length < 200 || response.toLowerCase().includes("visit the website for more"))) {
     
+    // Replace generic redirects with specific information
     if (response.toLowerCase().includes("recent projects")) {
       const projectInfo = portfolioContext.projects.map(project => 
         `- **${project.name}**: ${project.description} (Technologies: ${project.technologies})`
@@ -208,7 +211,31 @@ const postProcessResponse = (response) => {
       return `${portfolioContext.aiFeatures}\n\nYou can experience this AI assistant directly at ${portfolioContext.website}`;
     }
     
+    // For other cases, add more detailed information
     return `${response}\n\nShivashanker's portfolio showcases his skills including ${portfolioContext.skills.slice(0, 3).join(", ")} and projects like ${portfolioContext.projects.map(p => p.name).join(", ")}. You can explore more at ${portfolioContext.website}`;
+  }
+  
+  // For all responses, make sure link is not the main focus
+  if (response.includes(portfolioContext.website)) {
+    // Extract the link part of the response
+    const parts = response.split(portfolioContext.website);
+    
+    // If the response starts with the link or website reference, restructure it
+    if (parts[0].trim().length < 50 || parts[0].toLowerCase().includes("visit") || parts[0].toLowerCase().includes("check")) {
+      return `Based on Shivashanker's portfolio:\n\n${parts.join(portfolioContext.website)}`;
+    }
+    
+    // If the response ends with just the link, add context around it
+    if (parts.length > 1 && parts[parts.length-1].trim().length < 50) {
+      return `${parts[0]} ${portfolioContext.website}\n\nFeel free to ask more questions about Shivashanker's skills or projects!`;
+    }
+  }
+  
+  // If the response doesn't give enough information
+  if (response.toLowerCase().includes("i don't have") || 
+      response.toLowerCase().includes("i don't know") || 
+      response.toLowerCase().includes("not specified")) {
+    return `${response}\n\nHere's what I do know about Shivashanker:\n- He's a ${portfolioContext.role} with skills in ${portfolioContext.skills.slice(0, 3).join(", ")}\n- His projects include ${portfolioContext.projects.map(p => p.name).slice(0, 2).join(" and ")}\n\nFor more specific information, you can visit ${portfolioContext.website}`;
   }
   
   return response;
