@@ -25,8 +25,15 @@ app.set('trust proxy', 1);
 app.use('/uploads', express.static('uploads'));
 app.use(express.json());
 app.use(cors({
-    origin: ["http://localhost:3000", "https://shivashankerportfolio.netlify.app"],
-    credentials: true 
+    origin: [
+        "http://localhost:3000", 
+        "https://shivashankerportfolio.netlify.app", 
+        "https://shivashanker.com",
+        "https://www.shivashanker.com"
+    ],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(cookieParser());
 
@@ -59,8 +66,8 @@ app.get("/db-status", (req, res) => {
 
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
-app.get('/auth/google/callback', 
-    passport.authenticate('google', { failureRedirect: '/login' }), 
+app.get('/auth/google/callback',
+    passport.authenticate('google', { failureRedirect: '/login' }),
     (req, res) => {
         res.redirect('/profile');
     }
@@ -95,6 +102,20 @@ app.use('/api/references/get', GetReferenceRoute);
 app.use('/api', UkCitiesRouter);
 app.use('/api/projects', projectActionsRoute);
 app.use('/api/weather', weatherRoutes);
+
+// Catch-all route for undefined routes
+app.use((req, res) => {
+  res.status(404).json({ message: 'Resource not found' });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ 
+    message: 'Something went wrong!',
+    error: process.env.NODE_ENV === 'production' ? 'Server error' : err.message
+  });
+});
 
 const PORT = process.env.PORT || 8081;
 app.listen(PORT, () => {
