@@ -16,6 +16,7 @@ import UkCitiesRouter from './routes/ukCities.js';
 import apiChatRoute from './routes/apiChatRoute.js';
 import projectActionsRoute from './routes/projectActionsRoute.js';
 import weatherRoutes from './routes/weatherRoutes.js';
+import reviewsRoute from './routes/reviews.js';
 
 dotenv.config();
 
@@ -92,6 +93,7 @@ app.get('/logout', (req, res, next) => {
     });
 });
 
+// API Routes
 app.use('/api/chat', apiChatRoute);
 app.use('/api/login', LoginRoute);
 app.use('/api/register', RegisterRoute);
@@ -102,6 +104,7 @@ app.use('/api/references/get', GetReferenceRoute);
 app.use('/api', UkCitiesRouter);
 app.use('/api/projects', projectActionsRoute);
 app.use('/api/weather', weatherRoutes);
+app.use('/api/reviews', reviewsRoute);
 
 // Catch-all route for undefined routes
 app.use((req, res) => {
