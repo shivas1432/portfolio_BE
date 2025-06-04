@@ -1,7 +1,25 @@
 import express from 'express';
-import db from '../config/db.js';
+import { queryWithRetry, healthCheck } from '../config/db.js';
 
 const router = express.Router();
+
+// Health check endpoint
+router.get('/health', async (req, res) => {
+  try {
+    const health = await healthCheck();
+    if (health.status === 'healthy') {
+      res.json(health);
+    } else {
+      res.status(500).json(health);
+    }
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'unhealthy', 
+      message: 'Health check failed',
+      error: error.message 
+    });
+  }
+});
 
 // GET /api/reviews - Get all reviews grouped by category
 router.get('/', async (req, res) => {
@@ -22,19 +40,10 @@ router.get('/', async (req, res) => {
       params.push(category);
     }
     
-    // Remove the LIMIT and OFFSET - get all reviews
     query += ` ORDER BY r.created_at DESC`;
     
-    const reviews = await new Promise((resolve, reject) => {
-      db.query(query, params, (err, results) => {
-        if (err) {
-          console.error('Database query error:', err);
-          reject(err);
-        } else {
-          resolve(results);
-        }
-      });
-    });
+    // Use retry logic for reliable querying
+    const reviews = await queryWithRetry(query, params, 3, 15000);
     
     // Group reviews by category for frontend
     const groupedReviews = {
@@ -49,7 +58,6 @@ router.get('/', async (req, res) => {
       let parsedSkills = [];
       if (review.skills) {
         try {
-          // Check if skills is already an object/array or a string
           if (typeof review.skills === 'string') {
             parsedSkills = JSON.parse(review.skills);
           } else if (Array.isArray(review.skills)) {
@@ -58,13 +66,11 @@ router.get('/', async (req, res) => {
             parsedSkills = [];
           }
           
-          // Ensure it's an array
           if (!Array.isArray(parsedSkills)) {
             parsedSkills = [];
           }
         } catch (jsonError) {
           console.log(`Invalid JSON in skills for review ${review.id}: "${review.skills}"`);
-          console.log('JSON Error:', jsonError.message);
           parsedSkills = [];
         }
       }
@@ -90,10 +96,11 @@ router.get('/', async (req, res) => {
     res.json(groupedReviews);
     
   } catch (error) {
-    console.error('Error fetching reviews:', error);
+    console.error('Error fetching reviews:', error.message);
     res.status(500).json({ 
-      error: 'Internal server error',
-      message: 'Failed to fetch reviews' 
+      error: 'Database connection failed',
+      message: 'Unable to fetch reviews. Please try again later.',
+      details: error.message
     });
   }
 });
@@ -148,25 +155,16 @@ router.post('/', async (req, res) => {
     
     const avatarInitials = generateInitials(reviewer_name);
     
-    const result = await new Promise((resolve, reject) => {
-      db.query(insertQuery, [
-        reviewer_name,
-        reviewer_role || '',
-        program_id || null,
-        category,
-        rating,
-        review_text,
-        skillsJson,
-        avatarInitials
-      ], (err, results) => {
-        if (err) {
-          console.error('Database insert error:', err);
-          reject(err);
-        } else {
-          resolve(results);
-        }
-      });
-    });
+    const result = await queryWithRetry(insertQuery, [
+      reviewer_name,
+      reviewer_role || '',
+      program_id || null,
+      category,
+      rating,
+      review_text,
+      skillsJson,
+      avatarInitials
+    ], 3, 15000);
     
     console.log('Review added successfully with ID:', result.insertId);
     
@@ -177,10 +175,11 @@ router.post('/', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error adding review:', error);
+    console.error('Error adding review:', error.message);
     res.status(500).json({ 
-      error: 'Internal server error',
-      message: 'Failed to add review' 
+      error: 'Database connection failed',
+      message: 'Unable to add review. Please try again later.',
+      details: error.message
     });
   }
 });
@@ -204,31 +203,14 @@ router.get('/stats', async (req, res) => {
       GROUP BY category
     `;
     
-    const generalStats = await new Promise((resolve, reject) => {
-      db.query(statsQuery, (err, results) => {
-        if (err) {
-          console.error('Stats query error:', err);
-          reject(err);
-        } else {
-          resolve(results[0]);
-        }
-      });
-    });
-    
-    const categoryStats = await new Promise((resolve, reject) => {
-      db.query(categoryStatsQuery, (err, results) => {
-        if (err) {
-          console.error('Category stats query error:', err);
-          reject(err);
-        } else {
-          resolve(results);
-        }
-      });
-    });
+    const [generalStats, categoryStats] = await Promise.all([
+      queryWithRetry(statsQuery, [], 3, 10000),
+      queryWithRetry(categoryStatsQuery, [], 3, 10000)
+    ]);
     
     res.json({
-      totalReviews: generalStats.total_reviews || 0,
-      averageRating: parseFloat(generalStats.average_rating || 5.0).toFixed(1),
+      totalReviews: generalStats[0]?.total_reviews || 0,
+      averageRating: parseFloat(generalStats[0]?.average_rating || 5.0).toFixed(1),
       totalStudents: 580, // Static value as specified
       categoryStats: categoryStats.reduce((acc, stat) => {
         acc[stat.category] = {
@@ -240,15 +222,16 @@ router.get('/stats', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error fetching review stats:', error);
+    console.error('Error fetching review stats:', error.message);
     res.status(500).json({ 
-      error: 'Internal server error',
-      message: 'Failed to fetch review statistics' 
+      error: 'Database connection failed',
+      message: 'Unable to fetch statistics. Please try again later.',
+      details: error.message
     });
   }
 });
 
-// PUT /api/reviews/:id - Update a review (optional admin function)
+// PUT /api/reviews/:id - Update a review
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -296,25 +279,16 @@ router.put('/:id', async (req, res) => {
       }
     }
     
-    const result = await new Promise((resolve, reject) => {
-      db.query(updateQuery, [
-        reviewer_name,
-        reviewer_role || '',
-        program_id || null,
-        category,
-        rating,
-        review_text,
-        skillsJson,
-        id
-      ], (err, results) => {
-        if (err) {
-          console.error('Database update error:', err);
-          reject(err);
-        } else {
-          resolve(results);
-        }
-      });
-    });
+    const result = await queryWithRetry(updateQuery, [
+      reviewer_name,
+      reviewer_role || '',
+      program_id || null,
+      category,
+      rating,
+      review_text,
+      skillsJson,
+      id
+    ], 3, 15000);
     
     if (result.affectedRows === 0) {
       return res.status(404).json({
@@ -331,30 +305,22 @@ router.put('/:id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error updating review:', error);
+    console.error('Error updating review:', error.message);
     res.status(500).json({ 
-      error: 'Internal server error',
-      message: 'Failed to update review' 
+      error: 'Database connection failed',
+      message: 'Unable to update review. Please try again later.',
+      details: error.message
     });
   }
 });
 
-// DELETE /api/reviews/:id - Delete a review (admin function)
+// DELETE /api/reviews/:id - Delete a review
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
     const deleteQuery = 'DELETE FROM reviews WHERE id = ?';
-    const result = await new Promise((resolve, reject) => {
-      db.query(deleteQuery, [id], (err, results) => {
-        if (err) {
-          console.error('Delete query error:', err);
-          reject(err);
-        } else {
-          resolve(results);
-        }
-      });
-    });
+    const result = await queryWithRetry(deleteQuery, [id], 3, 10000);
     
     if (result.affectedRows === 0) {
       return res.status(404).json({
@@ -371,10 +337,11 @@ router.delete('/:id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error deleting review:', error);
+    console.error('Error deleting review:', error.message);
     res.status(500).json({ 
-      error: 'Internal server error',
-      message: 'Failed to delete review' 
+      error: 'Database connection failed',
+      message: 'Unable to delete review. Please try again later.',
+      details: error.message
     });
   }
 });
@@ -396,16 +363,11 @@ router.get('/category/:category', async (req, res) => {
       LIMIT ? OFFSET ?
     `;
     
-    const reviews = await new Promise((resolve, reject) => {
-      db.query(query, [category, parseInt(limit), parseInt(offset)], (err, results) => {
-        if (err) {
-          console.error('Database query error:', err);
-          reject(err);
-        } else {
-          resolve(results);
-        }
-      });
-    });
+    const reviews = await queryWithRetry(query, [
+      category, 
+      parseInt(limit), 
+      parseInt(offset)
+    ], 3, 15000);
     
     const processedReviews = reviews.map(review => {
       // Safe JSON parsing for skills
@@ -444,10 +406,11 @@ router.get('/category/:category', async (req, res) => {
     res.json(processedReviews);
     
   } catch (error) {
-    console.error('Error fetching category reviews:', error);
+    console.error('Error fetching category reviews:', error.message);
     res.status(500).json({ 
-      error: 'Internal server error',
-      message: 'Failed to fetch category reviews' 
+      error: 'Database connection failed',
+      message: 'Unable to fetch category reviews. Please try again later.',
+      details: error.message
     });
   }
 });
