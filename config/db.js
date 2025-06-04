@@ -1,66 +1,29 @@
-import mysql2 from 'mysql2/promise';
+import mysql2 from 'mysql2';
 import dotenv from 'dotenv';
+import fs from 'fs';
 
 // Load environment variables
 dotenv.config();
 
-// Simple connection pool for Aiven
-const pool = mysql2.createPool({
+const db = mysql2.createConnection({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_DATABASE,
   port: 25580,
   ssl: {
-    rejectUnauthorized: false  // Bypass SSL certificate issues
-  },
-  connectionLimit: 2,          // Keep very low for Aiven free tier
-  acquireTimeout: 60000,       // 60 seconds to get connection
+    ca: fs.readFileSync('./ca-cert.pem'),  // Path to the Aiven CA certificate
+    rejectUnauthorized: false  // Ignore certificate errors (not recommended for production)
+  }
 });
 
-// Test connection function
-async function testConnection() {
-  try {
-    const connection = await pool.getConnection();
-    console.log('Database connected successfully');
-    connection.release();
-    return true;
-  } catch (error) {
-    console.error('Database connection failed:', error.message);
-    return false;
+// Connect to the database
+db.connect((err) => {
+  if (err) {
+    console.error('Database connection failed:', err.message);
+  } else {
+    console.log('Connected to the database.');
   }
-}
+});
 
-// Query function with retry logic
-async function executeQuery(query, params = []) {
-  const maxRetries = 3;
-  let lastError;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const [results] = await pool.execute(query, params);
-      return results;
-    } catch (error) {
-      lastError = error;
-      console.error(`Query attempt ${attempt} failed:`, error.message);
-      
-      // Wait before retry for connection errors
-      if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
-        if (attempt < maxRetries) {
-          console.log(`Retrying in ${attempt * 1000}ms...`);
-          await new Promise(resolve => setTimeout(resolve, attempt * 1000));
-        }
-      } else {
-        throw error;
-      }
-    }
-  }
-  
-  throw lastError;
-}
-
-// Test connection on startup
-testConnection();
-
-export { pool, executeQuery };
-export default pool;
+export default db;
